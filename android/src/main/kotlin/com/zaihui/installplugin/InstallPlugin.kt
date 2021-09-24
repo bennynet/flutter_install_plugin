@@ -8,6 +8,9 @@ import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import androidx.core.content.FileProvider
+import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
@@ -22,17 +25,20 @@ import java.io.FileNotFoundException
  * @property registrar Registrar
  * @constructor
  */
-class InstallPlugin(private val registrar: Registrar) : MethodCallHandler {
+class InstallPlugin() : MethodCallHandler, FlutterPlugin, ActivityAware {
+    lateinit var registrar: MyRegistrar
+    lateinit var  channel: MethodChannel
     companion object {
         private const val installRequestCode = 1234
         private var apkFile: File? = null
         private var appId: String? = null
 
         @JvmStatic
-        fun registerWith(registrar: Registrar): Unit { 
-            val channel = MethodChannel(registrar.messenger(), "install_plugin")
-            val installPlugin = InstallPlugin(registrar)
-            channel.setMethodCallHandler(installPlugin)
+        fun registerWith(registrar: Registrar): Unit {
+            val installPlugin = InstallPlugin()
+            installPlugin.registrar= MyRegistrar.newFromRegistrar(registrar)
+            installPlugin.channel= MethodChannel(registrar.messenger(), "install_plugin")
+            installPlugin.channel.setMethodCallHandler(installPlugin)
             registrar.addActivityResultListener { requestCode, resultCode, intent ->
                 Log.d(
                     "ActivityResultListener",
@@ -71,7 +77,7 @@ class InstallPlugin(private val registrar: Registrar) : MethodCallHandler {
     private fun installApk(filePath: String?, currentAppId: String?) {
         if (filePath == null) throw NullPointerException("fillPath is null!")
         val activity: Activity =
-            registrar.activity() ?: throw NullPointerException("context is null!")
+            this.registrar.activity ?: throw NullPointerException("context is null!")
 
         val file = File(filePath)
         if (!file.exists()) throw FileNotFoundException("$filePath is not exist! or check permission")
@@ -129,5 +135,43 @@ class InstallPlugin(private val registrar: Registrar) : MethodCallHandler {
         val uri: Uri = FileProvider.getUriForFile(context, "$appId.fileProvider.install", file)
         intent.setDataAndType(uri, "application/vnd.android.package-archive")
         context.startActivity(intent)
+    }
+
+    override fun onAttachedToEngine(p0: FlutterPlugin.FlutterPluginBinding) {
+         this.registrar= MyRegistrar.newFromPluginBinding(p0);
+        this.channel = MethodChannel(registrar.messenger, "install_plugin")
+        this.channel.setMethodCallHandler(this)
+    }
+
+    override fun onDetachedFromEngine(p0: FlutterPlugin.FlutterPluginBinding) {
+        this.channel.setMethodCallHandler(null)
+    }
+
+    override fun onAttachedToActivity(p0: ActivityPluginBinding) {
+         this.registrar.activity=p0.activity;
+        p0.addActivityResultListener { requestCode, resultCode, intent ->
+            Log.d(
+                "ActivityResultListener",
+                "requestCode=$requestCode, resultCode = $resultCode, intent = $intent"
+            )
+            if (resultCode == Activity.RESULT_OK && requestCode == installRequestCode) {
+                this.install24(p0.activity.applicationContext, apkFile, appId)
+                true
+            } else
+
+                false
+        }
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() {
+
+    }
+
+    override fun onReattachedToActivityForConfigChanges(p0: ActivityPluginBinding) {
+
+    }
+
+    override fun onDetachedFromActivity() {
+
     }
 }
